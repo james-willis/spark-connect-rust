@@ -104,7 +104,7 @@ concurrency:
 
 env:
   # The release source is always fetched from this canonical apache repository.
-  UPSTREAM_REPO: apache/spark-connect-rust
+  UPSTREAM_REPO: james-willis/spark-connect-rust
 
 jobs:
   # A real (RC/finalize) run must come from a committer's fork, which holds the publish
