@@ -199,7 +199,13 @@ def main():
     ap.add_argument(
         "--remote", default=os.environ.get("SPARK_CONNECT_TESTING_REMOTE", "sc://localhost:15002")
     )
-    ap.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
+    ap.add_argument(
+        "--manifest",
+        action="append",
+        default=None,
+        help="Known-failures manifest. Repeat to combine several (e.g. the shared list plus "
+        "an interpreter-specific one). Defaults to scripts/parity_known_failures.txt.",
+    )
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--timeout", type=int, default=360)
     ap.add_argument(
@@ -257,7 +263,12 @@ def main():
         print("!! no connect test files found under", spark_py)
         return 2
 
-    per_file, whole_file = load_manifest(Path(args.manifest))
+    per_file, whole_file = {}, set()
+    for manifest in args.manifest or [str(DEFAULT_MANIFEST)]:
+        m_per_file, m_whole_file = load_manifest(Path(manifest))
+        for relpath, suffixes in m_per_file.items():
+            per_file.setdefault(relpath, []).extend(suffixes)
+        whole_file |= m_whole_file
     n_skip = sum(len(v) for v in per_file.values())
     print(
         f"Discovered {len(files)} connect test files; manifest skips "

@@ -234,11 +234,14 @@ jobs:
           # in the separate local-cluster phase below (mirroring Apache's
           # build_python_connect.yml, which runs exactly these under local-cluster) and
           # are excluded here where the server is plain local[*].
+          # The free-threaded leg adds scripts/parity_known_failures_freethreaded.txt on top
+          # of the shared manifest (environmental failures specific to free-threaded CPython).
           python scripts/run_official_tests.py \
             --spark "${{ steps.spark-source.outputs.SPARK_SOURCE }}" \
             --remote "${SPARK_CONNECT_TESTING_REMOTE}" \
             --jobs 1 \
             --exclude "test_artifact.py,test_artifact_localcluster.py,test_parity_resources.py" \
+            ${{ endsWith(matrix.python-version, 't') && '--manifest scripts/parity_known_failures.txt --manifest scripts/parity_known_failures_freethreaded.txt' || '' }} \
             2>&1 | tee /tmp/parity_ours.log
 
       - name: Restart Connect server in local-cluster mode
