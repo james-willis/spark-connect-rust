@@ -241,7 +241,7 @@ jobs:
             --remote "${SPARK_CONNECT_TESTING_REMOTE}" \
             --jobs 1 \
             --exclude "test_artifact.py,test_artifact_localcluster.py,test_parity_resources.py" \
-            ${{ endsWith(matrix.python-version, 't') && '--manifest scripts/parity_known_failures.txt --manifest scripts/parity_known_failures_freethreaded.txt' || '' }} \
+            ${{ endsWith(matrix.python-version, 't') && '--manifest scripts/parity_known_failures_freethreaded.txt' || '' }} \
             2>&1 | tee /tmp/parity_ours.log
 
       - name: Restart Connect server in local-cluster mode
