@@ -96,15 +96,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler
 
-      - name: Keep the GIL disabled on the free-threaded interpreter
-        # The official suite drives the reference pyspark client, which imports grpcio.
-        # grpcio has no free-threaded wheel and does not declare free-threading support,
-        # so importing it would silently re-enable the GIL and this leg would no longer
-        # test free-threaded execution. Force the GIL off for every process in the job,
-        # including the Connect server's Python workers.
-        if: endsWith(matrix.python-version, 't')
-        run: echo "PYTHON_GIL=0" >> "$GITHUB_ENV"
-
       - name: Install Python dependencies
         env:
           # grpcio and zstandard build from source on the free-threaded interpreter.
@@ -122,19 +113,26 @@ jobs:
           cargo build -p pyspark-rs --release
           cp target/release/lib_pyspark.so python/pyspark/_pyspark.so
 
-      - name: Check the free-threaded interpreter keeps the GIL disabled
-        # Fails the leg if the interpreter is not free-threaded, or if loading the test
-        # dependencies and our extension turns the GIL back on.
+      - name: Check the extension keeps the GIL disabled
+        # Runs WITHOUT PYTHON_GIL, so the interpreter decides whether to re-enable the GIL
+        # when a module that has not declared free-threading support is imported. Our
+        # extension and the free-threaded wheels must leave it disabled on their own.
         if: endsWith(matrix.python-version, 't')
         run: |
           python - <<'PY'
           import importlib.util, sys, sysconfig
           assert sysconfig.get_config_var("Py_GIL_DISABLED"), "not a free-threaded interpreter"
-          import numpy, pandas, pyarrow, zstandard, grpc, grpc_status  # noqa: F401
+          import numpy, pandas, pyarrow, zstandard  # noqa: F401
           spec = importlib.util.spec_from_file_location("_pyspark", "python/pyspark/_pyspark.so")
           spec.loader.exec_module(importlib.util.module_from_spec(spec))
-          assert not sys._is_gil_enabled(), "the GIL was re-enabled"
-          print("free-threaded, GIL disabled:", sys.version)
+          assert not sys._is_gil_enabled(), "the GIL was re-enabled by our extension or a test dependency"
+          print("GIL still disabled after loading _pyspark and the test dependencies")
+          # grpcio (imported by the reference client that drives the parity suite) has not
+          # declared free-threading support, which is why the parity steps set PYTHON_GIL=0.
+          # Flag it if that changes, so the override can be dropped.
+          import grpc, grpc_status  # noqa: F401
+          if not sys._is_gil_enabled():
+              print("::notice::grpcio no longer re-enables the GIL; PYTHON_GIL=0 may be unnecessary")
           PY
 
       - name: Cache Spark ${{ env.SPARK_VERSION }} distribution
@@ -182,6 +180,7 @@ jobs:
           # need pandas + pyarrow (installed above) plus pyspark (from SPARK_HOME/python).
           PYSPARK_PYTHON: python
           PYSPARK_DRIVER_PYTHON: python
+          PYTHON_GIL: ${{ endsWith(matrix.python-version, 't') && '0' || '' }}  # see the parity step
         run: |
           SPARK_HOME="${{ steps.spark-download.outputs.SPARK_HOME }}"
           echo "Starting Connect server on ${SPARK_CONNECT_TESTING_REMOTE}"
@@ -211,6 +210,10 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"   # stream per-file progress into the live log
           RUST_PYSPARK_SO: ${{ github.workspace }}/python/pyspark/_pyspark.so
+          # Free-threaded leg only: force the GIL off. The parity suite drives the reference
+          # client, which imports grpcio; grpcio has not declared free-threading support, so
+          # without this the GIL would be re-enabled and the leg would not test free-threading.
+          PYTHON_GIL: ${{ endsWith(matrix.python-version, 't') && '0' || '' }}
         run: |
           # pipefail so the script's exit code (nonzero on any unexpected failure) gates
           # the job - otherwise `| tee` would mask it and the gate would be falsely green.
@@ -246,6 +249,7 @@ jobs:
         env:
           PYSPARK_PYTHON: python
           PYSPARK_DRIVER_PYTHON: python
+          PYTHON_GIL: ${{ endsWith(matrix.python-version, 't') && '0' || '' }}  # see the parity step
         run: |
           SPARK_HOME="${{ steps.spark-download.outputs.SPARK_HOME }}"
           echo "Stopping the local[*] Connect server..."
@@ -280,6 +284,7 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
           RUST_PYSPARK_SO: ${{ github.workspace }}/python/pyspark/_pyspark.so
+          PYTHON_GIL: ${{ endsWith(matrix.python-version, 't') && '0' || '' }}  # see the parity step
         run: |
           set -o pipefail
           # Mirror Apache's local-cluster testnames: resource profiles + artifact
